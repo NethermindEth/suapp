@@ -1,0 +1,6 @@
+[submodule "suave-geth"]
+	path = suave-geth
+	url = git@github.com:flashbots/suave-geth.git
+[submodule "lib/forge-std"]
+	path = lib/forge-std
+	url = git@github.com:foundry-rs/forge-std
