@@ -12,8 +12,14 @@ contract Mempool {
         return txs;
     }
 
-    function submitTx(address from, uint8 value) public {
-        Tx memory trx = Tx(from, value);
+    function popTxs() public returns (Tx[] memory) {
+        Tx[] memory _txs = txs;
+        delete txs;
+        return _txs;
+    }
+
+    function submitTx(uint8 value) public {
+        Tx memory trx = Tx(msg.sender, value);
         txs.push(trx);
     }
 }
