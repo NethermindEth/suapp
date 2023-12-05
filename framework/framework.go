@@ -121,6 +121,29 @@ func (c *Contract) Call(methodName string) []interface{} {
 	return results
 }
 
+func (c *Contract) CallWithArgs(methodName string, args []interface{}) []interface{} {
+	input, err := c.abi.Pack(methodName, args)
+	if err != nil {
+		panic(err)
+	}
+
+	callMsg := ethereum.CallMsg{
+		To:   &c.addr,
+		Data: input,
+	}
+	rpcClient := ethclient.NewClient(c.fr.rpc)
+	output, err := rpcClient.CallContract(context.Background(), callMsg, nil)
+	if err != nil {
+		panic(err)
+	}
+
+	results, err := c.abi.Methods[methodName].Outputs.Unpack(output)
+	if err != nil {
+		panic(err)
+	}
+	return results
+}
+
 func (c *Contract) SendTransaction(method string, args []interface{}, confidentialBytes []byte) *types.Receipt {
 	txnResult, err := c.Contract.SendTransaction(method, args, confidentialBytes)
 	if err != nil {

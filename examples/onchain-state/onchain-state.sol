@@ -12,7 +12,7 @@ contract OnChainState {
     function getState() external returns (uint64) {
         return state;
     }
-    
+
     // nilExample is a function executed in a confidential request
     // that CANNOT modify the state of the smart contract.
     function nilExample() external payable returns (bytes memory) {
@@ -20,7 +20,7 @@ contract OnChainState {
         state++;
         return abi.encodeWithSelector(this.nilExampleCallback.selector);
     }
-    
+
     function exampleCallback() external payable {
         state++;
     }
