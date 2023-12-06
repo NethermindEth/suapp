@@ -43,6 +43,7 @@ type BuildBlockArgs struct {
 		Address   common.Address
 		Amount    uint64
 	}
+	Extra []byte
 }
 
 func (b *BidEvent) Unpack(log *types.Log) error {
