@@ -97,3 +97,45 @@ contract MevBoost {
         return payload;
     }
 }
+
+// Missing contract from bids.sol
+contract BundleBidContract {
+    event BidEvent(
+        Suave.BidId bidId,
+        uint64 decryptionCondition,
+        address[] allowedPeekers
+    );
+
+    function newBid(uint64 decryptionCondition, address[] memory bidAllowedPeekers, address[] memory bidAllowedStores) external payable returns (bytes memory) {
+        require(Suave.isConfidential());
+
+        bytes memory bundleData = this.fetchBidConfidentialBundleData();
+
+        uint64 egp = Suave.simulateBundle(bundleData);
+
+        Suave.Bid memory bid = Suave.newBid(decryptionCondition, bidAllowedPeekers, bidAllowedStores, "default:v0:ethBundles");
+
+        Suave.confidentialStore(bid.id, "default:v0:ethBundles", bundleData);
+        Suave.confidentialStore(bid.id, "default:v0:ethBundleSimResults", abi.encode(egp));
+
+        return emitAndReturn(bid, bundleData);
+    }
+
+    function emitAndReturn(Suave.Bid memory bid, bytes memory) internal virtual returns (bytes memory) {
+        emit BidEvent(bid.id, bid.decryptionCondition, bid.allowedPeekers);
+        return bytes.concat(this.emitBid.selector, abi.encode(bid));
+    }
+
+    function fetchBidConfidentialBundleData() public returns (bytes memory) {
+        require(Suave.isConfidential());
+
+        bytes memory confidentialInputs = Suave.confidentialInputs();
+        return abi.decode(confidentialInputs, (bytes));
+    }
+
+    // Bids to this contract should not be trusted!
+    function emitBid(Suave.Bid calldata bid) public {
+        emit BidEvent(bid.id, bid.decryptionCondition, bid.allowedPeekers);
+    }
+}
+

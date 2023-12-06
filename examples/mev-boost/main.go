@@ -104,7 +104,7 @@ func main() {
 	contractAddr1 := bundleContract.Ref(testAddr1)
 	allowedPeekers := []common.Address{bundleContract.Address()}
 	receipt := contractAddr1.SendTransaction(
-		"newBid", []interface{}{10, allowedPeekers, allowedPeekers}, bundleBytes)
+		"newBid", []interface{}{uint64(10), allowedPeekers, allowedPeekers}, bundleBytes)
 
 	if receipt.Status != 1 {
 		jsonEncodedReceipt, _ := receipt.MarshalJSON()
