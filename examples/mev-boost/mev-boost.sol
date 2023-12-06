@@ -3,9 +3,19 @@
 pragma solidity ^0.8.8;
 
 import "../../suave-geth/suave/sol/libraries/Suave.sol";
-import "../../suave-geth/suave/sol/standard_peekers/bids.sol";
 
-contract MevBoost is AnyBidContract {
+
+struct EgpBidPair {
+	uint64 egp; // in wei, beware overflow
+	Suave.BidId bidId;
+}
+
+contract MevBoost {
+	event BidEvent(
+		Suave.BidId bidId,
+		uint64 decryptionCondition,
+		address[] allowedPeekers
+	);
 
     event BuilderBoostBidEvent(
         Suave.BidId bidId,
@@ -55,7 +65,10 @@ contract MevBoost is AnyBidContract {
         return bidsByEGP;
     }
 
-    function doBuild(Suave.BuildBlockArgs memory blockArgs, uint64 blockHeight, Suave.BidId[] memory bids, string memory namespace) public view returns (Suave.Bid memory, bytes memory) {
+    function doBuild(Suave.BuildBlockArgs memory blockArgs,
+                     uint64 blockHeight,
+                     Suave.BidId[] memory bids,
+                     string memory namespace) public view returns (Suave.Bid memory, bytes memory) {
 
         address[] memory allowedPeekers = new address[](3);
         allowedPeekers[0] = address(this);
