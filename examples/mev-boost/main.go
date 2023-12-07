@@ -16,48 +16,6 @@ import (
 	"github.com/flashbots/suapp-examples/framework"
 )
 
-var hintEventABI abi.Event
-
-func init() {
-	artifact, err := framework.ReadArtifact("mev-boost.sol/OFAPrivate.json")
-	if err != nil {
-		log.Panic("Failed to read artifact: ", err)
-	}
-	hintEventABI = artifact.Abi.Events["HintEvent"]
-}
-
-type BuildBlockArgs struct {
-	Slot           uint64
-	ProposerPubkey []byte
-	Parent         common.Hash
-	Timestamp      uint64
-	FeeRecipient   common.Address
-	GasLimit       uint64
-	Random         common.Hash
-	Withdrawals    []struct {
-		Index     uint64
-		Validator uint64
-		Address   common.Address
-		Amount    uint64
-	}
-	Extra []byte
-}
-
-type HintEvent struct {
-	BidId [16]byte
-	Hint  []byte
-}
-
-func (h *HintEvent) Unpack(log *types.Log) error {
-	unpacked, err := hintEventABI.Inputs.Unpack(log.Data)
-	if err != nil {
-		return err
-	}
-	h.BidId = unpacked[0].([16]byte)
-	h.Hint = unpacked[1].([]byte)
-	return nil
-}
-
 func main() {
 	fr := framework.New()
 	ofaContract := fr.DeployContract("mev-boost.sol/OFAPrivate.json")
@@ -202,6 +160,50 @@ func BuilderLoop(
 		}
 		log.Println("[BUILDER] Block building completed")
 	}
+}
+
+// Structs and helpers
+
+var hintEventABI abi.Event
+
+func init() {
+	artifact, err := framework.ReadArtifact("mev-boost.sol/OFAPrivate.json")
+	if err != nil {
+		log.Panic("Failed to read artifact: ", err)
+	}
+	hintEventABI = artifact.Abi.Events["HintEvent"]
+}
+
+type BuildBlockArgs struct {
+	Slot           uint64
+	ProposerPubkey []byte
+	Parent         common.Hash
+	Timestamp      uint64
+	FeeRecipient   common.Address
+	GasLimit       uint64
+	Random         common.Hash
+	Withdrawals    []struct {
+		Index     uint64
+		Validator uint64
+		Address   common.Address
+		Amount    uint64
+	}
+	Extra []byte
+}
+
+type HintEvent struct {
+	BidId [16]byte
+	Hint  []byte
+}
+
+func (h *HintEvent) Unpack(log *types.Log) error {
+	unpacked, err := hintEventABI.Inputs.Unpack(log.Data)
+	if err != nil {
+		return err
+	}
+	h.BidId = unpacked[0].([16]byte)
+	h.Hint = unpacked[1].([]byte)
+	return nil
 }
 
 func createBackrunBundle(fr *framework.Framework, searcher *framework.PrivKey, beneficiary common.Address) []byte {
