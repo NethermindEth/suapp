@@ -1,14 +1,19 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"log"
+	"math/big"
+	"time"
+
+	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/flashbots/suapp-examples/framework"
-	"log"
-	"math/big"
 )
 
 var hintEventABI abi.Event
@@ -68,7 +73,6 @@ func main() {
 	fr.FundAccount(testAddr2.Address(), fundBalance)
 
 	dstAddr := testAddr2.Address()
-
 	ethTxn1, _ := fr.SignTx(testAddr1, &types.LegacyTx{
 		To:       &dstAddr,
 		Value:    big.NewInt(1000),
@@ -76,7 +80,16 @@ func main() {
 		GasPrice: big.NewInt(13),
 	})
 
-	log.Println("2. Send a bundle bid.")
+	log.Println("2. Start off-chain actors")
+	ethClient, _ := ethclient.Dial("ws://127.0.0.1:8546")
+	go SearcherLoop(
+		ethClient,
+		ofaContract,
+		testAddr2,
+		testAddr1.Address())
+	go BuilderLoop(6*time.Second, mevContract, testAddr1)
+
+	log.Println("3. Send a bundle bid.")
 	bundle := &types.SBundle{
 		Txs:             types.Transactions{ethTxn1},
 		RevertingHashes: []common.Hash{},
@@ -95,22 +108,109 @@ func main() {
 		return
 	}
 
-	hintEvent := &HintEvent{}
-	if err := hintEvent.Unpack(receipt.Logs[0]); err != nil {
-		log.Fatalf("Failed to unpack hint event: %s", err)
-	}
-	log.Println("Received hint event ", hintEvent.BidId)
+	// Next steps: proposer blind-sing the block header, send it to mevContract to receive block's payload
+	// ...
 
-	// Step 3. Send the backrun transaction
-	targetAddr := testAddr1.Address()
-	ethTxnBackrun, _ := fr.SignTx(testAddr2, &types.LegacyTx{
-		To:       &targetAddr,
+	time.Sleep(25 * time.Second)
+}
+
+// Off-chain Actors code
+
+func SearcherLoop(
+	client *ethclient.Client,
+	ofaContract *framework.Contract,
+	searcher *framework.PrivKey,
+	beneficiary common.Address,
+) {
+	fr := framework.New()
+	query := ethereum.FilterQuery{
+		Addresses: []common.Address{ofaContract.Address()},
+	}
+	logs := make(chan types.Log)
+	sub, err := client.SubscribeFilterLogs(context.Background(), query, logs)
+	if err != nil {
+		log.Fatal("[SEARCHER] Create logs filter: ", err)
+	}
+
+	ofaSearcher := ofaContract.Ref(searcher)
+	knownBids := map[types.BidId]struct{}{}
+
+	log.Println("[SEARCHER] Start listen to events")
+	for {
+		select {
+		case err := <-sub.Err():
+			log.Fatal("[SEARCHER] Subscription: ", err)
+		case vLog := <-logs:
+			hintEvent := &HintEvent{}
+			if err := hintEvent.Unpack(&vLog); err != nil {
+				log.Println("WARN[SEARCHER]: Failed to unpack hint event: ", err)
+				break
+			}
+			if _, ok := knownBids[hintEvent.BidId]; ok {
+				log.Println("[SEARCHER] Already known bid", hintEvent.BidId)
+				break
+			}
+
+			log.Println("[SEARCHER] Hint event received, id:", hintEvent.BidId)
+			log.Println("[SEARCHER] Send backrun")
+			backRunBundleBytes := createBackrunBundle(fr, searcher, beneficiary)
+
+			// backrun inputs
+			receipt := ofaSearcher.SendTransaction(
+				"newMatch", []interface{}{hintEvent.BidId}, backRunBundleBytes)
+
+			matchEvent := &HintEvent{}
+			if err := matchEvent.Unpack(receipt.Logs[0]); err != nil {
+				log.Fatalf("Failed to unpack match event: %s", err)
+			}
+			knownBids[matchEvent.BidId] = struct{}{}
+		}
+	}
+}
+
+func BuilderLoop(
+	blockTime time.Duration,
+	mevContract *framework.Contract,
+	account *framework.PrivKey) {
+	log.Printf("[BUILDER] block time: %s", blockTime)
+	builder := mevContract.Ref(account)
+
+	for {
+		time.Sleep(blockTime)
+		log.Println("[BUILDER] Block building started")
+
+		buildBlockArgs := &BuildBlockArgs{
+			Slot:           0,
+			ProposerPubkey: []byte{},
+			Parent:         common.Hash{},
+			Timestamp:      0,
+			FeeRecipient:   common.Address{},
+			GasLimit:       0,
+			Random:         common.Hash{},
+			Withdrawals: []struct {
+				Index     uint64
+				Validator uint64
+				Address   common.Address
+				Amount    uint64
+			}{},
+		}
+
+		receipt := builder.SendTransaction("buildBlock", []interface{}{buildBlockArgs, uint64(0)}, nil)
+		if receipt.Status != 1 {
+			jsonEncodedReceipt, _ := receipt.MarshalJSON()
+			log.Println("WARN: Sending build block request failed ", string(jsonEncodedReceipt))
+		}
+		log.Println("[BUILDER] Block building completed")
+	}
+}
+
+func createBackrunBundle(fr *framework.Framework, searcher *framework.PrivKey, beneficiary common.Address) []byte {
+	ethTxnBackrun, _ := fr.SignTx(searcher, &types.LegacyTx{
+		To:       &beneficiary,
 		Value:    big.NewInt(1000),
 		Gas:      21420,
 		GasPrice: big.NewInt(13),
 	})
-
-	log.Println("3. Send backrun")
 
 	backRunBundle := &types.SBundle{
 		Txs:             types.Transactions{ethTxnBackrun},
@@ -118,43 +218,5 @@ func main() {
 	}
 	backRunBundleBytes, _ := json.Marshal(backRunBundle)
 
-	// backrun inputs
-	ofaSearcher := ofaContract.Ref(testAddr2)
-	receipt = ofaSearcher.SendTransaction(
-		"newMatch", []interface{}{hintEvent.BidId}, backRunBundleBytes)
-
-	matchEvent := &HintEvent{}
-	if err := matchEvent.Unpack(receipt.Logs[0]); err != nil {
-		panic(err)
-	}
-
-	log.Println("Match event id", matchEvent.BidId)
-
-	log.Println("3. Build block.")
-
-	buildBlockArgs := &BuildBlockArgs{
-		Slot:           0,
-		ProposerPubkey: []byte{},
-		Parent:         common.Hash{},
-		Timestamp:      0,
-		FeeRecipient:   common.Address{},
-		GasLimit:       0,
-		Random:         common.Hash{},
-		Withdrawals: []struct {
-			Index     uint64
-			Validator uint64
-			Address   common.Address
-			Amount    uint64
-		}{},
-	}
-	mevFunded := mevContract.Ref(testAddr1)
-	receipt = mevFunded.SendTransaction("buildBlock", []interface{}{buildBlockArgs, uint64(0)}, nil)
-	if receipt.Status != 1 {
-		jsonEncodedReceipt, _ := receipt.MarshalJSON()
-		log.Println("Sending build block request failed", string(jsonEncodedReceipt))
-		return
-	}
-
-	// Next steps: proposer blind-sing the block header, send it to mevContract to receive block's payload
-	// ...
+	return backRunBundleBytes
 }
