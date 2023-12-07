@@ -52,16 +52,16 @@ contract MevBoost {
 
     function sortBundles(EgpBidPair[] memory bidsByEGP) internal pure returns (EgpBidPair[] memory) {
         // Bubble sort, cause why not
-        uint n = bidsByEGP.length;
-        for (uint i = 0; i < n - 1; i++) {
-            for (uint j = i + 1; j < n; j++) {
-                if (bidsByEGP[i].egp < bidsByEGP[j].egp) {
-                    EgpBidPair memory temp = bidsByEGP[i];
-                    bidsByEGP[i] = bidsByEGP[j];
-                    bidsByEGP[j] = temp;
-                }
-            }
-        }
+//        uint n = bidsByEGP.length;
+//        for (uint i = 0; i < n - 1; i++) {
+//            for (uint j = i + 1; j < n; j++) {
+//                if (bidsByEGP[i].egp < bidsByEGP[j].egp) {
+//                    EgpBidPair memory temp = bidsByEGP[i];
+//                    bidsByEGP[i] = bidsByEGP[j];
+//                    bidsByEGP[j] = temp;
+//                }
+//            }
+//        }
         return bidsByEGP;
     }
 
@@ -98,44 +98,65 @@ contract MevBoost {
     }
 }
 
-// Missing contract from bids.sol
-contract BundleBidContract {
-    event BidEvent(
-        Suave.BidId bidId,
-        uint64 decryptionCondition,
-        address[] allowedPeekers
+contract OFAPrivate {
+    address[] public addressList = [0xC8df3686b4Afb2BB53e60EAe97EF043FE03Fb829];
+
+    // Struct to hold hint-related information for an order.
+    struct HintOrder {
+        Suave.BidId id;
+        bytes hint;
+    }
+
+    event HintEvent (
+        Suave.BidId id,
+        bytes hint
     );
 
-    function newBid(uint64 decryptionCondition, address[] memory bidAllowedPeekers, address[] memory bidAllowedStores) external payable returns (bytes memory) {
-        require(Suave.isConfidential());
+    // Internal function to save order details and generate a hint.
+    function saveOrder() internal view returns (HintOrder memory) {
+        // Retrieve the bundle data from the confidential inputs
+        bytes memory bundleData = Suave.confidentialInputs();
 
-        bytes memory bundleData = this.fetchBidConfidentialBundleData();
-
+        // Simulate the bundle and extract its score.
         uint64 egp = Suave.simulateBundle(bundleData);
 
-        Suave.Bid memory bid = Suave.newBid(decryptionCondition, bidAllowedPeekers, bidAllowedStores, "default:v0:ethBundles");
+        // Extract a hint about this bundle that is going to be leaked
+        // to external applications.
+        bytes memory hint = Suave.extractHint(bundleData);
 
+        // Store the bundle and the simulation results in the confidential datastore.
+        Suave.Bid memory bid = Suave.newBid(10, addressList, addressList, "");
         Suave.confidentialStore(bid.id, "default:v0:ethBundles", bundleData);
         Suave.confidentialStore(bid.id, "default:v0:ethBundleSimResults", abi.encode(egp));
 
-        return emitAndReturn(bid, bundleData);
+        HintOrder memory hintOrder;
+        hintOrder.id = bid.id;
+        hintOrder.hint = hint;
+
+        return hintOrder;
     }
 
-    function emitAndReturn(Suave.Bid memory bid, bytes memory) internal virtual returns (bytes memory) {
-        emit BidEvent(bid.id, bid.decryptionCondition, bid.allowedPeekers);
-        return bytes.concat(this.emitBid.selector, abi.encode(bid));
+    function emitHint(HintOrder memory order) public payable {
+        emit HintEvent(order.id, order.hint);
     }
 
-    function fetchBidConfidentialBundleData() public returns (bytes memory) {
-        require(Suave.isConfidential());
-
-        bytes memory confidentialInputs = Suave.confidentialInputs();
-        return abi.decode(confidentialInputs, (bytes));
+    // Function to create a new user order
+    function newOrder() external payable returns (bytes memory) {
+        HintOrder memory hintOrder = saveOrder();
+        return abi.encodeWithSelector(this.emitHint.selector, hintOrder);
     }
 
-    // Bids to this contract should not be trusted!
-    function emitBid(Suave.Bid calldata bid) public {
-        emit BidEvent(bid.id, bid.decryptionCondition, bid.allowedPeekers);
+    // Function to match and backrun another bid.
+    function newMatch(Suave.BidId shareBidId) external payable returns (bytes memory) {
+        HintOrder memory hintOrder = saveOrder();
+
+        // Merge the bids and store them in the confidential datastore.
+        // The 'fillMevShareBundle' precompile will use this information to send the bundles.
+        Suave.BidId[] memory bids = new Suave.BidId[](2);
+        bids[0] = shareBidId;
+        bids[1] = hintOrder.id;
+        Suave.confidentialStore(hintOrder.id, "default:v0:mergedBids", abi.encode(bids));
+
+        return abi.encodeWithSelector(this.emitHint.selector, hintOrder);
     }
 }
-
