@@ -1,0 +1,103 @@
+package main
+
+import (
+	"context"
+	"errors"
+	"os"
+
+	"github.com/ethereum/go-ethereum"
+	"github.com/ethereum/go-ethereum/accounts/abi"
+	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/ethclient"
+	"github.com/flashbots/suapp-examples/framework"
+	"github.com/sirupsen/logrus"
+)
+
+const (
+	SuaveNodeRpc        = "ws://127.0.0.1:8546"
+	ContractAddrEnv     = "CONTRACT_ADDR"
+	EventTypeName       = "BuilderBidEvent"
+	ContractAbiJsonPath = "optimism-builder.sol/OpBuilder.json"
+)
+
+var (
+	errMissingContractAddr = errors.New("missing contract address to listen events for")
+	errArtifactRead        = errors.New("failed to read artifact from " + ContractAbiJsonPath)
+)
+
+type EventListener struct {
+	ethclient    *ethclient.Client
+	log          *logrus.Entry
+	contractAddr common.Address
+	eventAbi     abi.Event
+}
+
+func NewEventListener(log *logrus.Entry) (*EventListener, error) {
+	ethClient, err := ethclient.Dial(SuaveNodeRpc)
+	if err != nil {
+		return nil, err
+	}
+
+	addrHex := os.Getenv(ContractAddrEnv)
+	if addrHex == "" {
+		return nil, errMissingContractAddr
+	}
+	contractAddr := common.HexToAddress(addrHex)
+
+	artifact, err := framework.ReadArtifact(ContractAbiJsonPath)
+	if err != nil {
+		return nil, errArtifactRead
+	}
+	eventAbi := artifact.Abi.Events[EventTypeName]
+
+	return &EventListener{
+		log:          log,
+		ethclient:    ethClient,
+		contractAddr: contractAddr,
+		eventAbi:     eventAbi,
+	}, nil
+}
+
+func (el *EventListener) Listen() {
+	//fr := framework.New()
+	el.log.Println("Start listen to events", "RPC", SuaveNodeRpc, "contract", el.contractAddr.Hex())
+	query := ethereum.FilterQuery{
+		Addresses: []common.Address{el.contractAddr},
+	}
+	logs := make(chan types.Log)
+	sub, err := el.ethclient.SubscribeFilterLogs(context.Background(), query, logs)
+	if err != nil {
+		el.log.Fatal("Create logs filter: ", err)
+	}
+
+	for {
+		select {
+		case err := <-sub.Err():
+			el.log.Fatal("Subscription: ", err)
+		case vLog := <-logs:
+			event := &BuilderBidEvent{}
+			if err := event.Unpack(&vLog, el.eventAbi); err != nil {
+				el.log.Warn("Failed to unpack hint event: ", err)
+				break
+			}
+
+			el.log.WithField("Event", event).Println("Event received, id:", event.BidId)
+		}
+	}
+}
+
+type BuilderBidEvent struct {
+	BidId      [16]byte
+	BuilderBid []byte
+}
+
+func (h *BuilderBidEvent) Unpack(log *types.Log, eventAbi abi.Event) error {
+	unpacked, err := eventAbi.Inputs.Unpack(log.Data)
+	if err != nil {
+		return err
+	}
+	h.BidId = unpacked[0].([16]byte)
+	h.BuilderBid = unpacked[1].([]byte)
+	return nil
+}
