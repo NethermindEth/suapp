@@ -88,6 +88,15 @@ contract OpBuilder {
         return payload;
     }
 
+    function emitNothingAfterBlockRetrievedCallback() external payable {
+    }
+
+    function postBlockToRelay(string memory relayUrl, bytes memory builderBid) public payable returns (bytes memory) {
+        Suave.SubmitEthBlockBidToRelay(relayUrl, builderBid);
+        return abi.encodeWithSelector(this.emitNothingAfterBlockRetrievedCallback.selector);
+    }
+
+
     function fetchBidConfidentialBundleData() public view returns (bytes memory) {
         require(Suave.isConfidential());
 

@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"sync"
 
+	builderCapella "github.com/attestantio/go-builder-client/api/capella"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/flashbots/go-utils/httplogger"
 	"github.com/gorilla/mux"
@@ -15,28 +17,23 @@ import (
 type UserAgent string
 
 const (
-	HeaderKeySlotUID     = "X-MEVBoost-SlotID"
-	HeaderKeyVersion     = "X-MEVBoost-Version"
-	HeaderKeyForkVersion = "X-MEVBoost-ForkVersion"
-	pathGetOPPayload     = "/eth/v1/builder/get_payload/{parent_hash:0x[a-fA-F0-9]+}"
+	pathGetOPPayload      = "/eth/v1/builder/get_payload/{parent_hash:0x[a-fA-F0-9]+}"
+	pathGetBlockFromSuave = "/relay/v1/builder/blocks"
 )
 
 var (
 	errServerAlreadyRunning = errors.New("server already running")
-	errHTTPErrorResponse    = errors.New("HTTP error response")
-	errInvalidForkVersion   = errors.New("invalid fork version")
-	errInvalidTransaction   = errors.New("invalid transaction")
-	errMaxRetriesExceeded   = errors.New("max retries exceeded")
-	errInvalidSlot          = errors.New("invalid slot")
+	errBidNotFound          = errors.New("bid not found")
 	errInvalidHash          = errors.New("invalid hash")
-	errInvalidPubkey        = errors.New("invalid pubkey")
 )
 
 // BoostService - the mev-boost service
 type BoostService struct {
-	listenAddr string
-	log        *logrus.Entry
-	srv        *http.Server
+	listenAddr   string
+	log          *logrus.Entry
+	srv          *http.Server
+	payloadCache map[common.Hash]builderCapella.SubmitBlockRequest
+	cacheLock    sync.Mutex
 }
 
 func NewBoostService(log *logrus.Entry, listenAddr string) (*BoostService, error) {
@@ -76,6 +73,7 @@ func (m *BoostService) getRouter() http.Handler {
 
 	r.HandleFunc("/", m.handleRoot)
 	r.HandleFunc(pathGetOPPayload, m.handleOPGetPayload).Methods(http.MethodGet)
+	r.HandleFunc(pathGetBlockFromSuave, m.handleGetBlockFromSuave).Methods(http.MethodPost)
 
 	r.Use(mux.CORSMethodMiddleware(r))
 	loggedRouter := httplogger.LoggingMiddlewareLogrus(m.log, r)
@@ -89,15 +87,41 @@ func (m *BoostService) handleOPGetPayload(w http.ResponseWriter, req *http.Reque
 	vars := mux.Vars(req)
 	parentHashHex := vars["parent_hash"]
 
-	//ua := UserAgent(req.Header.Get("User-Agent"))
-
 	if len(parentHashHex) != 66 {
 		m.respondError(w, http.StatusBadRequest, errInvalidHash.Error())
 		return
 	}
 
-	// Return the bid
-	//m.respondOK(w, &result.response.Payload)
+	var (
+		bid builderCapella.SubmitBlockRequest
+		ok  = false
+	)
+	m.cacheLock.Lock()
+	bid, ok = m.payloadCache[common.HexToHash(parentHashHex)]
+	m.cacheLock.Unlock()
+
+	if !ok {
+		m.respondError(w, http.StatusNotFound, errBidNotFound.Error())
+		return
+	}
+
+	m.respondOK(w, translateResponse(bid))
+}
+
+func (m *BoostService) handleGetBlockFromSuave(w http.ResponseWriter, req *http.Request) {
+	log := m.log.WithField("method", "getBlockFromSuave")
+	log.Debug("getBlockFromSuave request starts")
+
+	resp := builderCapella.SubmitBlockRequest{}
+	defer req.Body.Close()
+	if err := json.NewDecoder(req.Body).Decode(&resp); err != nil {
+		m.respondError(w, http.StatusBadRequest, err.Error())
+	}
+
+	m.cacheLock.Lock()
+	defer m.cacheLock.Unlock()
+	m.payloadCache[common.Hash(resp.ExecutionPayload.ParentHash)] = resp
+
 	m.respondOK(w, nilResponse)
 }
 
