@@ -13,9 +13,6 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-// UserAgent is a custom string type to avoid confusing url + userAgent parameters in SendHTTPRequest
-type UserAgent string
-
 const (
 	pathGetOPPayload      = "/eth/v1/builder/get_payload/{parent_hash:0x[a-fA-F0-9]+}"
 	pathGetBlockFromSuave = "/relay/v1/builder/blocks"

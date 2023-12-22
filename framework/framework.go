@@ -172,6 +172,10 @@ func New() *Framework {
 	}
 }
 
+func (f *Framework) ContractAt(addr common.Address, abi *abi.ABI) *Contract {
+	return &Contract{addr: addr, fr: f, abi: abi, Contract: sdk.GetContract(addr, abi, f.clt)}
+}
+
 func (f *Framework) DeployContract(path string) *Contract {
 	artifact, err := ReadArtifact(path)
 	if err != nil {

@@ -35,7 +35,7 @@ type OPBid struct {
 
 func translateResponse(bid builderCapella.SubmitBlockRequest) opBidResp {
 	return opBidResp{
-		t: time.Now(),
+		t: time.Unix(int64(bid.ExecutionPayload.Timestamp), 0),
 		response: OPBid{
 			Value:   bid.Message.Value,
 			Payload: bid.ExecutionPayload,
