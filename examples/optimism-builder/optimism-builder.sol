@@ -40,7 +40,10 @@ contract OpBuilder {
         return bytes.concat(this.emitBid.selector, abi.encode(bid));
     }
 
-    function buildBlock(Suave.BuildBlockArgs memory blockArgs, uint64 blockHeight) public returns (bytes memory) {
+    function buildBlock(
+        /*Suave.BuildBlockArgs memory blockArgs, <- commented to make it easie to call for now */
+        uint64 blockHeight
+    ) public returns (bytes memory) {
         require(Suave.isConfidential());
 
         Suave.Bid[] memory allBids = Suave.fetchBids(blockHeight, "default:v0:ethBundles");
@@ -53,6 +56,10 @@ contract OpBuilder {
         for (uint i = 0; i < allBids.length; i++) {
             allBidIds[i] = allBids[i].id;
         }
+
+        // Hand-made buildArgs to not have to deal with it at the moment
+        // None of the real values could be provided here...
+        Suave.BuildBlockArgs memory blockArgs;
 
         (Suave.Bid memory blockBid, bytes memory builderBid) = this.doBuild(blockArgs, blockHeight, allBidIds, "");
         emit BuilderBidEvent(blockBid.id, builderBid);
@@ -92,7 +99,7 @@ contract OpBuilder {
     }
 
     function postBlockToRelay(string memory relayUrl, bytes memory builderBid) public payable returns (bytes memory) {
-        Suave.SubmitEthBlockBidToRelay(relayUrl, builderBid);
+        Suave.submitEthBlockBidToRelay(relayUrl, builderBid);
         return abi.encodeWithSelector(this.emitNothingAfterBlockRetrievedCallback.selector);
     }
 

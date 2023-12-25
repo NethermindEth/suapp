@@ -15,11 +15,11 @@ import (
 )
 
 const (
-	SuaveNodeRpc            = "ws://127.0.0.1:8546"
-	ContractAddrEnv         = "CONTRACT_ADDR"
-	EventTypeName           = "BuilderBidEvent"
-	ContractAbiJsonPath     = "optimism-builder.sol/OpBuilder.json"
-	ContractPostBlockMethod = "postBlockToRelay"
+	SuaveNodeRpc             = "ws://127.0.0.1:8546"
+	ContractAddrEnv          = "CONTRACT_ADDR"
+	EventTypeName            = "BidEvent"
+	ContractAbiJsonPath      = "optimism-builder.sol/OpBuilder.json"
+	ContractBuildBlockMethod = "buildBlock"
 
 	// BuilderPrivKey Builder address "0xDceef22333b11aD2CAb54Be2A8ECe08EE64D919C" needs to be funded
 	BuilderPrivKey = "9b6fa7074578db9ce7752ac85bf5c0acd071c7115f8fc02abdd435918edd4b62"
@@ -28,8 +28,8 @@ const (
 var (
 	errMissingContractAddr = errors.New("missing contract address to listen events for")
 	errArtifactRead        = errors.New("failed to read artifact from " + ContractAbiJsonPath)
-	errMissingMethod       = errors.New("missing method " + ContractPostBlockMethod + " in abi" + ContractAbiJsonPath)
-	errUnsuccessfulTx      = errors.New("unsuccessful transaction to " + ContractPostBlockMethod)
+	errMissingMethod       = errors.New("missing method " + ContractBuildBlockMethod + " in abi" + ContractAbiJsonPath)
+	errUnsuccessfulTx      = errors.New("unsuccessful transaction to " + ContractBuildBlockMethod)
 )
 
 type EventListener struct {
@@ -83,20 +83,20 @@ func (el *EventListener) Listen() {
 		case err := <-sub.Err():
 			el.log.Fatal("Subscription: ", err)
 		case vLog := <-logs:
-			event := &BuilderBidEvent{}
+			event := &BidEvent{}
 			if err := event.Unpack(&vLog, el.eventAbi); err != nil {
 				el.log.Warn("Failed to unpack hint event: ", err)
 				break
 			}
 
 			el.log.WithField("Event", event).Println("Event received, id:", event.BidId)
-			el.SendPostBlockToRelay(event.BidId)
+			el.TriggerBlockBuild(event.BidId)
 		}
 	}
 }
 
 // Assumes Builder account is funded, see `BuilderAddr` in constants
-func (el *EventListener) SendPostBlockToRelay(builderBid types.BidId) error {
+func (el *EventListener) TriggerBlockBuild(builderBid types.BidId) error {
 	fr := framework.New()
 
 	builder := framework.NewPrivKeyFromHex(BuilderPrivKey)
@@ -104,7 +104,8 @@ func (el *EventListener) SendPostBlockToRelay(builderBid types.BidId) error {
 	ctrct := fr.ContractAt(el.contractAddr, el.artifact.Abi)
 	builderCtrct := ctrct.Ref(builder)
 
-	receipt := builderCtrct.SendTransaction(ContractPostBlockMethod, []interface{}{DefaultListenAddr, builderBid}, nil)
+	blkNo := uint64(0)
+	receipt := builderCtrct.SendTransaction(ContractBuildBlockMethod, []interface{}{blkNo}, nil)
 
 	if receipt.Status == 0 {
 		return errUnsuccessfulTx
@@ -113,17 +114,19 @@ func (el *EventListener) SendPostBlockToRelay(builderBid types.BidId) error {
 	return nil
 }
 
-type BuilderBidEvent struct {
-	BidId      [16]byte
-	BuilderBid []byte
+type BidEvent struct {
+	BidId       [16]byte
+	decryptCond uint64
+	peekers     []common.Address
 }
 
-func (h *BuilderBidEvent) Unpack(log *types.Log, eventAbi abi.Event) error {
+func (h *BidEvent) Unpack(log *types.Log, eventAbi abi.Event) error {
 	unpacked, err := eventAbi.Inputs.Unpack(log.Data)
 	if err != nil {
 		return err
 	}
 	h.BidId = unpacked[0].([16]byte)
-	h.BuilderBid = unpacked[1].([]byte)
+	h.decryptCond = unpacked[1].(uint64)
+	h.peekers = unpacked[2].([]common.Address)
 	return nil
 }
