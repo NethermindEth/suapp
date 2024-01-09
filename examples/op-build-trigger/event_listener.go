@@ -3,7 +3,7 @@ package main
 import (
 	"context"
 	"errors"
-	"os"
+	"math/big"
 
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts/abi"
@@ -40,17 +40,11 @@ type EventListener struct {
 	eventAbi     abi.Event
 }
 
-func NewEventListener(log *logrus.Entry) (*EventListener, error) {
+func NewEventListener(log *logrus.Entry, contractAddress common.Address) (*EventListener, error) {
 	ethClient, err := ethclient.Dial(SuaveNodeRpc)
 	if err != nil {
 		return nil, err
 	}
-
-	addrHex := os.Getenv(ContractAddrEnv)
-	if addrHex == "" {
-		return nil, errMissingContractAddr
-	}
-	contractAddr := common.HexToAddress(addrHex)
 
 	artifact, err := framework.ReadArtifact(ContractAbiJsonPath)
 	if err != nil {
@@ -61,7 +55,7 @@ func NewEventListener(log *logrus.Entry) (*EventListener, error) {
 	return &EventListener{
 		log:          log,
 		ethclient:    ethClient,
-		contractAddr: contractAddr,
+		contractAddr: contractAddress,
 		artifact:     artifact,
 		eventAbi:     eventAbi,
 	}, nil
@@ -98,13 +92,15 @@ func (el *EventListener) Listen() {
 // Assumes Builder account is funded, see `BuilderAddr` in constants
 func (el *EventListener) TriggerBlockBuild(builderBid types.BidId) error {
 	fr := framework.New()
-
 	builder := framework.NewPrivKeyFromHex(BuilderPrivKey)
+
+	fundBalance := big.NewInt(1000000000000000000)
+	fr.FundAccount(builder.Address(), fundBalance)
 
 	ctrct := fr.ContractAt(el.contractAddr, el.artifact.Abi)
 	builderCtrct := ctrct.Ref(builder)
 
-	blkNo := uint64(0)
+	blkNo := uint64(10)
 	receipt := builderCtrct.SendTransaction(ContractBuildBlockMethod, []interface{}{blkNo}, nil)
 
 	if receipt.Status == 0 {

@@ -124,6 +124,7 @@ func (c *Contract) Call(methodName string) []interface{} {
 func (c *Contract) SendTransaction(method string, args []interface{}, confidentialBytes []byte) *types.Receipt {
 	txnResult, err := c.Contract.SendTransaction(method, args, confidentialBytes)
 	if err != nil {
+		fmt.Println("failed to send transaction", "err", err)
 		panic(err)
 	}
 	receipt, err := txnResult.Wait()

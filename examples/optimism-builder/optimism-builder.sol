@@ -1,9 +1,12 @@
+// SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.8;
 
 import "../../suave-geth/suave/sol/libraries/Suave.sol";
 
 // Builder contract
 contract OpBuilder {
+    address[] public addressList = [Suave.ANYALLOWED];
+
     event BidEvent(
         Suave.BidId bidId,
         uint64 decryptionCondition,
@@ -27,12 +30,12 @@ contract OpBuilder {
     }
 
     // INFO: Since for now we don't implement the IBundle, we do a shortcut and receive the Txs (or Bundles - to be decided) directly here.
-    function newTx(uint64 blockHeight, address[] memory bidAllowedPeekers, address[] memory bidAllowedStores) external payable returns (bytes memory) {
+    function newTx(uint64 blockHeight) external payable returns (bytes memory) {
         require(Suave.isConfidential());
+        bytes memory bundleData = Suave.confidentialInputs();
 
-        bytes memory bundleData = fetchBidConfidentialBundleData();
-
-        Suave.Bid memory bid = Suave.newBid(blockHeight, bidAllowedPeekers, bidAllowedStores, "default:v0:ethBundles");
+        // Allow anyone to peek at the bundle
+        Suave.Bid memory bid = Suave.newBid(blockHeight, addressList, addressList, "default:v0:ethBundles");
 
         Suave.confidentialStore(bid.id, "default:v0:ethBundles", bundleData);
 
@@ -44,7 +47,7 @@ contract OpBuilder {
         /*Suave.BuildBlockArgs memory blockArgs, <- commented to make it easie to call for now */
         uint64 blockHeight
     ) public returns (bytes memory) {
-        require(Suave.isConfidential());
+        // require(Suave.isConfidential());
 
         Suave.Bid[] memory allBids = Suave.fetchBids(blockHeight, "default:v0:ethBundles");
         if (allBids.length == 0) {
@@ -101,13 +104,5 @@ contract OpBuilder {
     function postBlockToRelay(string memory relayUrl, bytes memory builderBid) public payable returns (bytes memory) {
         Suave.submitEthBlockBidToRelay(relayUrl, builderBid);
         return abi.encodeWithSelector(this.emitNothingAfterBlockRetrievedCallback.selector);
-    }
-
-
-    function fetchBidConfidentialBundleData() public view returns (bytes memory) {
-        require(Suave.isConfidential());
-
-        bytes memory confidentialInputs = Suave.confidentialInputs();
-        return abi.decode(confidentialInputs, (bytes));
     }
 }
