@@ -124,6 +124,7 @@ func (c *Contract) Call(methodName string) []interface{} {
 func (c *Contract) SendTransaction(method string, args []interface{}, confidentialBytes []byte) *types.Receipt {
 	txnResult, err := c.Contract.SendTransaction(method, args, confidentialBytes)
 	if err != nil {
+		fmt.Println("failed to send transaction", "err", err)
 		panic(err)
 	}
 	receipt, err := txnResult.Wait()
@@ -170,6 +171,10 @@ func New() *Framework {
 		rpc:    rpc,
 		clt:    clt,
 	}
+}
+
+func (f *Framework) ContractAt(addr common.Address, abi *abi.ABI) *Contract {
+	return &Contract{addr: addr, fr: f, abi: abi, Contract: sdk.GetContract(addr, abi, f.clt)}
 }
 
 func (f *Framework) DeployContract(path string) *Contract {
