@@ -28,7 +28,6 @@ const (
 var (
 	errMissingContractAddr = errors.New("missing contract address to listen events for")
 	errArtifactRead        = errors.New("failed to read artifact from " + ContractAbiJsonPath)
-	errMissingMethod       = errors.New("missing method " + ContractPostBlockMethod + " in abi" + ContractAbiJsonPath)
 	errUnsuccessfulTx      = errors.New("unsuccessful transaction to " + ContractPostBlockMethod)
 )
 
