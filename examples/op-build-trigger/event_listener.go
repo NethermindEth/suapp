@@ -15,14 +15,14 @@ import (
 )
 
 const (
-	SuaveNodeRpc             = "ws://127.0.0.1:8546"
+	SuaveNodeRpc             = "ws://127.0.0.1:11546"
 	ContractAddrEnv          = "CONTRACT_ADDR"
 	EventTypeName            = "BidEvent"
 	ContractAbiJsonPath      = "optimism-builder.sol/OpBuilder.json"
 	ContractBuildBlockMethod = "buildBlock"
 
 	// BuilderPrivKey Builder address "0xDceef22333b11aD2CAb54Be2A8ECe08EE64D919C" needs to be funded
-	BuilderPrivKey = "9b6fa7074578db9ce7752ac85bf5c0acd071c7115f8fc02abdd435918edd4b62"
+	BuilderPrivKey = "91ab9a7e53c220e6210460b65a7a3bb2ca181412a8a7b43ff336b3df1737ce12"
 )
 
 var (
@@ -100,8 +100,8 @@ func (el *EventListener) TriggerBlockBuild(builderBid types.BidId) error {
 	ctrct := fr.ContractAt(el.contractAddr, el.artifact.Abi)
 	builderCtrct := ctrct.Ref(builder)
 
-	blkNo := uint64(10)
-	receipt := builderCtrct.SendTransaction(ContractBuildBlockMethod, []interface{}{blkNo}, nil)
+	el.log.Info("Trigger block build")
+	receipt := builderCtrct.SendTransaction(ContractBuildBlockMethod, []interface{}{}, []byte("hello"))
 
 	if receipt.Status == 0 {
 		return errUnsuccessfulTx

@@ -3,8 +3,10 @@ package main
 import (
 	"encoding/json"
 	"flag"
+	"fmt"
 	"math/big"
 	"os"
+	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -29,15 +31,18 @@ func main() {
 
 	fr := framework.New()
 
+	balance, err := fr.Balance(common.HexToAddress("0xb5feafbdd752ad52afb7e1bd2e40432a485bbb7f"))
+	fmt.Printf("Balance of account 0xb5feafbdd752ad52afb7e1bd2e40432a485bbb7f: %d\n", balance)
+
 	contract := fr.DeployContract("optimism-builder.sol/OpBuilder.json")
 	log.Infof("contract deployed at address: %s", contract.Address())
 
-	evListSrv, err := NewEventListener(log, contract.Address())
-	if err != nil {
-		log.WithError(err).Fatal("failed creating the event listener")
-	}
-
-	go evListSrv.Listen()
+	// evListSrv, err := NewEventListener(log, contract.Address())
+	// if err != nil {
+	// 	log.WithError(err).Fatal("failed creating the event listener")
+	// }
+	//
+	// go evListSrv.Listen()
 
 	// Send transaction to contract newTx()
 	log.Info("1. Create and fund test accounts")
@@ -62,7 +67,6 @@ func main() {
 
 	log.Info("2. Send transaction")
 
-	blockHeight := uint64(10)
 	bundle := &types.SBundle{
 		Txs:             types.Transactions{tx1},
 		RevertingHashes: []common.Hash{},
@@ -70,8 +74,17 @@ func main() {
 	bundleBytes, _ := json.Marshal(bundle)
 
 	contractAddr1 := contract.Ref(testAddr1)
-	receipt := contractAddr1.SendTransaction("newTx", []interface{}{blockHeight}, bundleBytes)
+	receipt := contractAddr1.SendTransaction("newTx", []interface{}{}, bundleBytes)
 	log.Info("Transaction sent", "receipt", receipt)
+
+	time.Sleep(5 * time.Second)
+
+	log.Info("3. Check number of bids")
+
+	ret := contractAddr1.SendTransaction("getNumberOfBids", []interface{}{}, nil)
+
+	log.Info("Transaction sent", "ret", ret)
+
 	signalCh := make(chan os.Signal, 1)
 	for {
 		select {

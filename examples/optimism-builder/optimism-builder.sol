@@ -8,79 +8,97 @@ contract OpBuilder {
     address[] public addressList = [Suave.ANYALLOWED];
 
     event BidEvent(
-        Suave.BidId bidId,
+        Suave.DataId bidId,
         uint64 decryptionCondition,
         address[] allowedPeekers
     );
 
     event BuilderBidEvent(
-        Suave.BidId bidId,
+        Suave.DataId bidId,
         bytes builderBid
     );
 
     // Emitter helpers
-    function emitBuilderBidAndBid(Suave.Bid memory bid, bytes memory builderBid) public returns (Suave.Bid memory, bytes memory) {
-        emit BuilderBidEvent(bid.id, builderBid);
-        emit BidEvent(bid.id, bid.decryptionCondition, bid.allowedPeekers);
-        return (bid, builderBid);
+    function emitBuilderBidAndBid(Suave.DataRecord memory record, bytes memory builderBid) public returns (Suave.DataRecord memory, bytes memory) {
+        emit BuilderBidEvent(record.id, builderBid);
+        emit BidEvent(record.id, record.decryptionCondition, record.allowedPeekers);
+        return (record, builderBid);
     }
 
-    function emitBid(Suave.Bid calldata bid) public {
-        emit BidEvent(bid.id, bid.decryptionCondition, bid.allowedPeekers);
+    function emitBid(Suave.DataRecord calldata record) public {
+        emit BidEvent(record.id, record.decryptionCondition, record.allowedPeekers);
     }
 
     // INFO: Since for now we don't implement the IBundle, we do a shortcut and receive the Txs (or Bundles - to be decided) directly here.
-    function newTx(uint64 blockHeight) external payable returns (bytes memory) {
+    function newTx() external payable returns (bytes memory) {
         require(Suave.isConfidential());
         bytes memory bundleData = Suave.confidentialInputs();
 
         // Allow anyone to peek at the bundle
-        Suave.Bid memory bid = Suave.newBid(blockHeight, addressList, addressList, "default:v0:ethBundles");
+        Suave.DataRecord memory record = Suave.newDataRecord(10, addressList, addressList, "v0");
+        Suave.confidentialStore(record.id, "default:v0:ethBundles", bundleData);
 
-        Suave.confidentialStore(bid.id, "default:v0:ethBundles", bundleData);
+        emit BidEvent(record.id, record.decryptionCondition, record.allowedPeekers);
+        return bytes.concat(this.emitBid.selector, abi.encode(record));
+    }
 
-        emit BidEvent(bid.id, bid.decryptionCondition, bid.allowedPeekers);
-        return bytes.concat(this.emitBid.selector, abi.encode(bid));
+    function getNumberOfBids() external payable returns (uint) {
+        Suave.DataRecord[] memory allRecords = Suave.fetchDataRecords(10, "default:v0:ethBundles");
+        return allRecords.length;
     }
 
     function buildBlock(
-        /*Suave.BuildBlockArgs memory blockArgs, <- commented to make it easie to call for now */
-        uint64 blockHeight
     ) public returns (bytes memory) {
-        // require(Suave.isConfidential());
-
-        Suave.Bid[] memory allBids = Suave.fetchBids(blockHeight, "default:v0:ethBundles");
-        if (allBids.length == 0) {
+        require(Suave.isConfidential());
+        Suave.DataRecord[] memory allRecords = Suave.fetchDataRecords(10, "default:v0:ethBundles");
+        if (allRecords.length == 0) {
             // TODO: we should build empty blocks as well
             revert Suave.PeekerReverted(address(this), "no bids");
         }
 
-        Suave.BidId[] memory allBidIds = new Suave.BidId[](allBids.length);
-        for (uint i = 0; i < allBids.length; i++) {
-            allBidIds[i] = allBids[i].id;
+        Suave.DataId[] memory allRecordIds = new Suave.DataId[](allRecords.length);
+        for (uint i = 0; i < allRecords.length; i++) {
+            allRecordIds[i] = allRecords[i].id;
         }
 
-        // Hand-made buildArgs to not have to deal with it at the moment
-        // None of the real values could be provided here...
+        // NOTE: these are all arbitrary values for now. The attributes are Handled by
+        // the remote rpc.
         Suave.BuildBlockArgs memory blockArgs;
 
-        (Suave.Bid memory blockBid, bytes memory builderBid) = this.doBuild(blockArgs, blockHeight, allBidIds, "");
+        blockArgs.slot = 0;
+        blockArgs.proposerPubkey = "";
+        blockArgs.parent = blockhash(block.number);
+        blockArgs.timestamp = uint64(0);
+        blockArgs.feeRecipient = address(0);
+        blockArgs.gasLimit = uint64(0);
+        blockArgs.random = blockhash(block.number);
+
+         // Initialize the withdrawals field
+        Suave.Withdrawal[] memory tempWithdrawals = new Suave.Withdrawal[](1);
+
+        // Manually setting values for each withdrawal
+        tempWithdrawals[0] = Suave.Withdrawal({
+            index: 0,
+            validator: 0,
+            Address: address(0x123), // Example address
+            amount: 1000       // Example amount
+        });
+
+        blockArgs.withdrawals = tempWithdrawals;
+        blockArgs.extra = "";
+        blockArgs.fillPending = false;
+
+        (Suave.DataRecord memory blockBid, bytes memory builderBid) = this.doBuild(blockArgs, allRecordIds, "");
         emit BuilderBidEvent(blockBid.id, builderBid);
         emit BidEvent(blockBid.id, blockBid.decryptionCondition, blockBid.allowedPeekers);
         return bytes.concat(this.emitBuilderBidAndBid.selector, abi.encode(blockBid, builderBid));
     }
 
     function doBuild(Suave.BuildBlockArgs memory blockArgs,
-        uint64 blockHeight,
-        Suave.BidId[] memory bids,
+        Suave.DataId[] memory bids,
         string memory namespace
-    ) public view returns (Suave.Bid memory, bytes memory) {
-
-        address[] memory allowedPeekers = new address[](3);
-        allowedPeekers[0] = address(this);
-        allowedPeekers[1] = Suave.BUILD_ETH_BLOCK;
-
-        Suave.Bid memory blockBid = Suave.newBid(blockHeight, allowedPeekers, allowedPeekers, "default:v0:mergedBids");
+    ) public view returns (Suave.DataRecord memory, bytes memory) {
+        Suave.DataRecord memory blockBid = Suave.newDataRecord(10, addressList, addressList, "default:v0:mergedBids");
         Suave.confidentialStore(blockBid.id, "default:v0:mergedBids", abi.encode(bids));
 
         (bytes memory builderBid, bytes memory payload) = Suave.buildEthBlock(blockArgs, blockBid.id, namespace);
@@ -90,7 +108,7 @@ contract OpBuilder {
     }
 
     // INFO: This function is called by MevBoost to fetch the block payload and expose it to the sequencer.
-    function getBlock(Suave.BidId bidId) public view returns (bytes memory) {
+    function getBlock(Suave.DataId bidId) public view returns (bytes memory) {
         require(Suave.isConfidential());
 
         // TODO: Access control?
@@ -102,7 +120,7 @@ contract OpBuilder {
     }
 
     function postBlockToRelay(string memory relayUrl, bytes memory builderBid) public payable returns (bytes memory) {
-        Suave.submitEthBlockBidToRelay(relayUrl, builderBid);
+        Suave.submitEthBlockToRelay(relayUrl, builderBid);
         return abi.encodeWithSelector(this.emitNothingAfterBlockRetrievedCallback.selector);
     }
 }

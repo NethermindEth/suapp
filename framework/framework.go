@@ -151,7 +151,7 @@ type Config struct {
 
 func DefaultConfig() *Config {
 	return &Config{
-		KettleRPC:  "http://localhost:8545",
+		KettleRPC:  "http://localhost:11545",
 		KettleAddr: common.HexToAddress("b5feafbdd752ad52afb7e1bd2e40432a485bbb7f"),
 
 		// This account is funded in both devnev networks
@@ -218,7 +218,7 @@ func (f *Framework) NewClient(acct *PrivKey) *sdk.Client {
 }
 
 func (f *Framework) SignTx(priv *PrivKey, tx *types.LegacyTx) (*types.Transaction, error) {
-	rpc, _ := rpc.Dial("http://localhost:8545")
+	rpc, _ := rpc.Dial("http://localhost:11545")
 
 	cltAcct1 := sdk.NewClient(rpc, priv.Priv, common.Address{})
 	signedTxn, err := cltAcct1.SignTxn(tx)
@@ -252,4 +252,12 @@ func (f *Framework) FundAccount(to common.Address, value *big.Int) error {
 		return errFundAccount
 	}
 	return nil
+}
+
+func (f *Framework) Balance(addr common.Address) (*big.Int, error) {
+	balance, err := f.clt.RPC().BalanceAt(context.Background(), addr, nil)
+	if err != nil {
+		return nil, err
+	}
+	return balance, nil
 }
