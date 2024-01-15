@@ -112,6 +112,7 @@ func (el *EventListener) Listen() {
 					break
 				}
 				el.log.Printf("%+v\n", builderBidEvent)
+				el.SubmitBlock(builderBidEvent.BidId, "http://localhost:18550")
 			} else {
 				el.log.Warn("Unknown event: ", vLog.Topics[0].Hex())
 			}
