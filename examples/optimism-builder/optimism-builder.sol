@@ -20,6 +20,11 @@ contract OpBuilder {
         bytes envelope
     );
 
+    event SubmitToRelayEvent(
+        string relayUrl,
+        Suave.DataId dataId
+    );
+
     // Emitter helpers
     function emitNewBuilderBidEvent(Suave.DataRecord memory record, bytes memory envelope) public {
         emit NewBuilderBidEvent(record.id, record.decryptionCondition, record.allowedPeekers, envelope);
@@ -27,6 +32,10 @@ contract OpBuilder {
 
     function emitNewBundleEvent(Suave.DataRecord calldata record) public {
         emit NewBundleEvent(record.id, record.decryptionCondition, record.allowedPeekers);
+    }
+
+    function emitSubmitToRelayEvent(string memory relayUrl, Suave.DataId dataId) public {
+        emit SubmitToRelayEvent(relayUrl, dataId);
     }
 
     // INFO: Since for now we don't implement the IBundle, we do a shortcut and receive the Txs (or Bundles - to be decided) directly here.
@@ -105,19 +114,10 @@ contract OpBuilder {
     }
 
     // INFO: This function is called by MevBoost to fetch the block payload and expose it to the sequencer.
-    function getBlock(Suave.DataId bidId) public view returns (bytes memory) {
+    function submitBlock(Suave.DataId bidId, string memory relayUrl) public view returns (bytes memory) {
         require(Suave.isConfidential());
-
-        // TODO: Access control?
-        bytes memory payload = Suave.confidentialRetrieve(bidId, "default:v0:builderPayload");
-        return payload;
-    }
-
-    function emitNothingAfterBlockRetrievedCallback() external payable {
-    }
-
-    function postBlockToRelay(string memory relayUrl, bytes memory builderBid) public payable returns (bytes memory) {
+        bytes memory builderBid = Suave.confidentialRetrieve(bidId, "default:v0:builderBids");
         Suave.submitEthBlockToRelay(relayUrl, builderBid);
-        return abi.encodeWithSelector(this.emitNothingAfterBlockRetrievedCallback.selector);
+        return bytes.concat(this.emitSubmitToRelayEvent.selector, abi.encode(relayUrl, bidId));
     }
 }

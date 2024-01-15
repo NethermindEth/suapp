@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"errors"
-	"math/big"
 
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts/abi"
@@ -22,6 +21,7 @@ const (
 	NewBuilderBidEventName   = "NewBuilderBidEvent"
 	ContractAbiJsonPath      = "optimism-builder.sol/OpBuilder.json"
 	ContractBuildBlockMethod = "buildBlock"
+	ContractPostBlockMethod  = "postBlockToRelay"
 
 	// BuilderPrivKey Builder address "0xDceef22333b11aD2CAb54Be2A8ECe08EE64D919C" needs to be funded
 	BuilderPrivKey = "91ab9a7e53c220e6210460b65a7a3bb2ca181412a8a7b43ff336b3df1737ce12"
@@ -32,6 +32,7 @@ var (
 	errArtifactRead        = errors.New("failed to read artifact from " + ContractAbiJsonPath)
 	errMissingMethod       = errors.New("missing method " + ContractBuildBlockMethod + " in abi" + ContractAbiJsonPath)
 	errUnsuccessfulTx      = errors.New("unsuccessful transaction to " + ContractBuildBlockMethod)
+	errSubmitBlock         = errors.New("failed to submit block")
 )
 
 type EventListener struct {
@@ -119,23 +120,35 @@ func (el *EventListener) Listen() {
 }
 
 // Assumes Builder account is funded, see `BuilderAddr` in constants
-func (el *EventListener) TriggerBlockBuild(builderBid types.BidId, decryptCond uint64) error {
+func (el *EventListener) TriggerBlockBuild(bidId types.BidId, decryptCond uint64) error {
 	fr := framework.New()
 	builder := framework.NewPrivKeyFromHex(BuilderPrivKey)
-
-	fundBalance := big.NewInt(1000000000000000000)
-	fr.FundAccount(builder.Address(), fundBalance)
 
 	ctrct := fr.ContractAt(el.contractAddr, el.artifact.Abi)
 	builderCtrct := ctrct.Ref(builder)
 
-	el.log.Info("Trigger block build for block ", decryptCond, " with bid ", builderBid)
+	el.log.Info("Trigger block build for block ", decryptCond, " with bid ", bidId)
 	receipt := builderCtrct.SendTransaction(ContractBuildBlockMethod, []interface{}{decryptCond}, []byte("hello"))
 
 	if receipt.Status == 0 {
 		return errUnsuccessfulTx
 	}
 
+	return nil
+}
+
+func (el *EventListener) SubmitBlock(bidId types.BidId, url string) error {
+	fr := framework.New()
+	builder := framework.NewPrivKeyFromHex(BuilderPrivKey)
+
+	ctrct := fr.ContractAt(el.contractAddr, el.artifact.Abi)
+	builderCtrct := ctrct.Ref(builder)
+
+	el.log.Info("Submit block ", url, " with bid ", bidId)
+	receipt := builderCtrct.SendTransaction(ContractPostBlockMethod, []interface{}{bidId, url}, []byte("hello"))
+	if receipt.Status == 0 {
+		return errSubmitBlock
+	}
 	return nil
 }
 
