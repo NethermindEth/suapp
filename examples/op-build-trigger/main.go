@@ -18,6 +18,7 @@ import (
 const (
 	LogLevel               = "debug"
 	OpDevAccountPrivKeyHex = "ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
+	OpChainId              = 901
 )
 
 func main() {
@@ -74,7 +75,11 @@ func main() {
 
 	opTxn1 := types.NewTransaction(nonce, ephemeralAddr, big.NewInt(1000), 21000, big.NewInt(13), nil)
 
-	opTxn1Signed, err := types.SignTx(opTxn1, types.NewEIP155Signer(big.NewInt(901)), OpDevAccountPrivKey.Priv)
+	opTxn1Signed, err := types.SignTx(opTxn1, types.NewEIP155Signer(big.NewInt(OpChainId)), OpDevAccountPrivKey.Priv)
+
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	bundle := &types.SBundle{
 		Txs:             types.Transactions{opTxn1Signed},
