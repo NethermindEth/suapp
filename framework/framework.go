@@ -129,8 +129,10 @@ func (c *Contract) SendTransaction(method string, args []interface{}, confidenti
 	}
 	receipt, err := txnResult.Wait()
 	if err != nil {
+		fmt.Println("failed to wait for transaction", "err", err)
 		panic(err)
 	}
+
 	if receipt.Status == 0 {
 		panic("bad")
 	}

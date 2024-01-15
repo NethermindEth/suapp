@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"math/big"
 	"os"
-	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -37,12 +36,12 @@ func main() {
 	contract := fr.DeployContract("optimism-builder.sol/OpBuilder.json")
 	log.Infof("contract deployed at address: %s", contract.Address())
 
-	// evListSrv, err := NewEventListener(log, contract.Address())
-	// if err != nil {
-	// 	log.WithError(err).Fatal("failed creating the event listener")
-	// }
-	//
-	// go evListSrv.Listen()
+	evListSrv, err := NewEventListener(log, contract.Address())
+	if err != nil {
+		log.WithError(err).Fatal("failed creating the event listener")
+	}
+
+	go evListSrv.Listen()
 
 	// Send transaction to contract newTx()
 	log.Info("1. Create and fund test accounts")
@@ -76,14 +75,6 @@ func main() {
 	contractAddr1 := contract.Ref(testAddr1)
 	receipt := contractAddr1.SendTransaction("newTx", []interface{}{}, bundleBytes)
 	log.Info("Transaction sent", "receipt", receipt)
-
-	time.Sleep(5 * time.Second)
-
-	log.Info("3. Check number of bids")
-
-	ret := contractAddr1.SendTransaction("getNumberOfBids", []interface{}{}, nil)
-
-	log.Info("Transaction sent", "ret", ret)
 
 	signalCh := make(chan os.Signal, 1)
 	for {

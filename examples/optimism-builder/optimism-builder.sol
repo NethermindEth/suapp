@@ -5,7 +5,7 @@ import "../../suave-geth/suave/sol/libraries/Suave.sol";
 
 // Builder contract
 contract OpBuilder {
-    address[] public addressList = [Suave.ANYALLOWED];
+    address[] public addressList = [Suave.ANYALLOWED, Suave.BUILD_ETH_BLOCK];
 
     event BidEvent(
         Suave.DataId bidId,
@@ -35,16 +35,11 @@ contract OpBuilder {
         bytes memory bundleData = Suave.confidentialInputs();
 
         // Allow anyone to peek at the bundle
-        Suave.DataRecord memory record = Suave.newDataRecord(10, addressList, addressList, "v0");
+        Suave.DataRecord memory record = Suave.newDataRecord(10, addressList, addressList, "default:v0:ethBundles");
         Suave.confidentialStore(record.id, "default:v0:ethBundles", bundleData);
 
         emit BidEvent(record.id, record.decryptionCondition, record.allowedPeekers);
         return bytes.concat(this.emitBid.selector, abi.encode(record));
-    }
-
-    function getNumberOfBids() external payable returns (uint) {
-        Suave.DataRecord[] memory allRecords = Suave.fetchDataRecords(10, "default:v0:ethBundles");
-        return allRecords.length;
     }
 
     function buildBlock(
@@ -88,7 +83,7 @@ contract OpBuilder {
         blockArgs.extra = "";
         blockArgs.fillPending = false;
 
-        (Suave.DataRecord memory blockBid, bytes memory builderBid) = this.doBuild(blockArgs, allRecordIds, "");
+        (Suave.DataRecord memory blockBid, bytes memory builderBid) = doBuild(blockArgs, allRecordIds, "default:v0:ethBundles");
         emit BuilderBidEvent(blockBid.id, builderBid);
         emit BidEvent(blockBid.id, blockBid.decryptionCondition, blockBid.allowedPeekers);
         return bytes.concat(this.emitBuilderBidAndBid.selector, abi.encode(blockBid, builderBid));
@@ -97,9 +92,9 @@ contract OpBuilder {
     function doBuild(Suave.BuildBlockArgs memory blockArgs,
         Suave.DataId[] memory bids,
         string memory namespace
-    ) public view returns (Suave.DataRecord memory, bytes memory) {
-        Suave.DataRecord memory blockBid = Suave.newDataRecord(10, addressList, addressList, "default:v0:mergedBids");
-        Suave.confidentialStore(blockBid.id, "default:v0:mergedBids", abi.encode(bids));
+    ) internal view returns (Suave.DataRecord memory, bytes memory) {
+        Suave.DataRecord memory blockBid = Suave.newDataRecord(10, addressList, addressList, "default:v0:mergedDataRecords");
+        Suave.confidentialStore(blockBid.id, "default:v0:mergedDataRecords", abi.encode(bids));
 
         (bytes memory builderBid, bytes memory payload) = Suave.buildEthBlock(blockArgs, blockBid.id, namespace);
         Suave.confidentialStore(blockBid.id, "default:v0:builderPayload", payload); // only through this.unlock
