@@ -7,48 +7,49 @@ import "../../suave-geth/suave/sol/libraries/Suave.sol";
 contract OpBuilder {
     address[] public addressList = [Suave.ANYALLOWED, Suave.BUILD_ETH_BLOCK];
 
-    event BidEvent(
-        Suave.DataId bidId,
+    event NewBundleEvent(
+        Suave.DataId dataId,
         uint64 decryptionCondition,
         address[] allowedPeekers
     );
 
-    event BuilderBidEvent(
-        Suave.DataId bidId,
-        bytes builderBid
+    event NewBuilderBidEvent(
+        Suave.DataId dataId,
+        uint64 decryptionCondition,
+        address[] allowedPeekers,
+        bytes envelope
     );
 
     // Emitter helpers
-    function emitBuilderBidAndBid(Suave.DataRecord memory record, bytes memory builderBid) public returns (Suave.DataRecord memory, bytes memory) {
-        emit BuilderBidEvent(record.id, builderBid);
-        emit BidEvent(record.id, record.decryptionCondition, record.allowedPeekers);
-        return (record, builderBid);
+    function emitNewBuilderBidEvent(Suave.DataRecord memory record, bytes memory envelope) public {
+        emit NewBuilderBidEvent(record.id, record.decryptionCondition, record.allowedPeekers, envelope);
     }
 
-    function emitBid(Suave.DataRecord calldata record) public {
-        emit BidEvent(record.id, record.decryptionCondition, record.allowedPeekers);
+    function emitNewBundleEvent(Suave.DataRecord calldata record) public {
+        emit NewBundleEvent(record.id, record.decryptionCondition, record.allowedPeekers);
     }
 
     // INFO: Since for now we don't implement the IBundle, we do a shortcut and receive the Txs (or Bundles - to be decided) directly here.
-    function newTx() external payable returns (bytes memory) {
+    function newTx(uint64 blockNumber) external payable returns (bytes memory) {
         require(Suave.isConfidential());
         bytes memory bundleData = Suave.confidentialInputs();
 
         // Allow anyone to peek at the bundle
-        Suave.DataRecord memory record = Suave.newDataRecord(10, addressList, addressList, "default:v0:ethBundles");
+        Suave.DataRecord memory record = Suave.newDataRecord(blockNumber, addressList, addressList, "default:v0:ethBundles");
         Suave.confidentialStore(record.id, "default:v0:ethBundles", bundleData);
 
-        emit BidEvent(record.id, record.decryptionCondition, record.allowedPeekers);
-        return bytes.concat(this.emitBid.selector, abi.encode(record));
+        emit NewBundleEvent(record.id, record.decryptionCondition, record.allowedPeekers);
+        return bytes.concat(this.emitNewBundleEvent.selector, abi.encode(record));
     }
 
     function buildBlock(
+        uint64 blockNumber
     ) public returns (bytes memory) {
         require(Suave.isConfidential());
-        Suave.DataRecord[] memory allRecords = Suave.fetchDataRecords(10, "default:v0:ethBundles");
+        Suave.DataRecord[] memory allRecords = Suave.fetchDataRecords(blockNumber, "default:v0:ethBundles");
         if (allRecords.length == 0) {
             // TODO: we should build empty blocks as well
-            revert Suave.PeekerReverted(address(this), "no bids");
+            revert Suave.PeekerReverted(address(this), "no bundles in default:v0:ethBundles");
         }
 
         Suave.DataId[] memory allRecordIds = new Suave.DataId[](allRecords.length);
@@ -56,7 +57,7 @@ contract OpBuilder {
             allRecordIds[i] = allRecords[i].id;
         }
 
-        // NOTE: these are all arbitrary values for now. The attributes are Handled by
+        // NOTE: these are all arbitrary values for now. Attributes are handled by
         // the remote rpc.
         Suave.BuildBlockArgs memory blockArgs;
 
@@ -83,23 +84,24 @@ contract OpBuilder {
         blockArgs.extra = "";
         blockArgs.fillPending = false;
 
-        (Suave.DataRecord memory blockBid, bytes memory builderBid) = doBuild(blockArgs, allRecordIds, "default:v0:ethBundles");
-        emit BuilderBidEvent(blockBid.id, builderBid);
-        emit BidEvent(blockBid.id, blockBid.decryptionCondition, blockBid.allowedPeekers);
-        return bytes.concat(this.emitBuilderBidAndBid.selector, abi.encode(blockBid, builderBid));
+        (Suave.DataRecord memory mergedDataRecord, Suave.DataRecord memory builderBidRecord, bytes memory envelope) = doBuild(
+            blockArgs, allRecordIds, "default:v0:ethBundles", blockNumber);
+        return bytes.concat(this.emitNewBuilderBidEvent.selector, abi.encode(builderBidRecord, envelope));
     }
 
-    function doBuild(Suave.BuildBlockArgs memory blockArgs,
-        Suave.DataId[] memory bids,
-        string memory namespace
-    ) internal view returns (Suave.DataRecord memory, bytes memory) {
-        Suave.DataRecord memory blockBid = Suave.newDataRecord(10, addressList, addressList, "default:v0:mergedDataRecords");
-        Suave.confidentialStore(blockBid.id, "default:v0:mergedDataRecords", abi.encode(bids));
+    function doBuild(
+        Suave.BuildBlockArgs memory blockArgs,
+        Suave.DataId[] memory recordIds,
+        string memory namespace,
+        uint64 blockNumber
+    ) internal view returns (Suave.DataRecord memory, Suave.DataRecord memory, bytes memory) {
+        Suave.DataRecord memory mergedDataRecord = Suave.newDataRecord(blockNumber, addressList, addressList, "default:v0:mergedDataRecords");
+        Suave.confidentialStore(mergedDataRecord.id, "default:v0:mergedDataRecords", abi.encode(recordIds));
 
-        (bytes memory builderBid, bytes memory payload) = Suave.buildEthBlock(blockArgs, blockBid.id, namespace);
-        Suave.confidentialStore(blockBid.id, "default:v0:builderPayload", payload); // only through this.unlock
-
-        return (blockBid, builderBid);
+        (bytes memory builderBid, bytes memory envelope) = Suave.buildEthBlock(blockArgs, mergedDataRecord.id, namespace); // namespace is not used.
+        Suave.DataRecord memory builderBidRecord = Suave.newDataRecord(blockNumber, addressList, addressList, "default:v0:builderBids");
+        Suave.confidentialStore(builderBidRecord.id, "default:v0:builderBids", builderBid);
+        return (mergedDataRecord, builderBidRecord, envelope);
     }
 
     // INFO: This function is called by MevBoost to fetch the block payload and expose it to the sequencer.

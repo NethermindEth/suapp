@@ -9,6 +9,7 @@ import (
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/flashbots/suapp-examples/framework"
 	"github.com/sirupsen/logrus"
@@ -17,7 +18,8 @@ import (
 const (
 	SuaveNodeRpc             = "ws://127.0.0.1:11546"
 	ContractAddrEnv          = "CONTRACT_ADDR"
-	EventTypeName            = "BidEvent"
+	NewBundleEventName       = "NewBundleEvent"
+	NewBuilderBidEventName   = "NewBuilderBidEvent"
 	ContractAbiJsonPath      = "optimism-builder.sol/OpBuilder.json"
 	ContractBuildBlockMethod = "buildBlock"
 
@@ -33,11 +35,13 @@ var (
 )
 
 type EventListener struct {
-	ethclient    *ethclient.Client
-	log          *logrus.Entry
-	contractAddr common.Address
-	artifact     *framework.Artifact
-	eventAbi     abi.Event
+	ethclient          *ethclient.Client
+	opEthClient        *ethclient.Client
+	log                *logrus.Entry
+	contractAddr       common.Address
+	artifact           *framework.Artifact
+	bundleEventAbi     abi.Event
+	builderBidEventAbi abi.Event
 }
 
 func NewEventListener(log *logrus.Entry, contractAddress common.Address) (*EventListener, error) {
@@ -46,18 +50,26 @@ func NewEventListener(log *logrus.Entry, contractAddress common.Address) (*Event
 		return nil, err
 	}
 
+	opEthClient, err := ethclient.Dial("http://localhost:9545")
+	if err != nil {
+		return nil, err
+	}
+
 	artifact, err := framework.ReadArtifact(ContractAbiJsonPath)
 	if err != nil {
 		return nil, errArtifactRead
 	}
-	eventAbi := artifact.Abi.Events[EventTypeName]
+	bundleEventAbi := artifact.Abi.Events[NewBundleEventName]
+	builderBidEventAbi := artifact.Abi.Events[NewBuilderBidEventName]
 
 	return &EventListener{
-		log:          log,
-		ethclient:    ethClient,
-		contractAddr: contractAddress,
-		artifact:     artifact,
-		eventAbi:     eventAbi,
+		log:                log,
+		ethclient:          ethClient,
+		opEthClient:        opEthClient,
+		contractAddr:       contractAddress,
+		artifact:           artifact,
+		bundleEventAbi:     bundleEventAbi,
+		builderBidEventAbi: builderBidEventAbi,
 	}, nil
 }
 
@@ -72,25 +84,42 @@ func (el *EventListener) Listen() {
 		el.log.Fatal("Create logs filter: ", err)
 	}
 
+	bundleEventSig := []byte("NewBundleEvent(bytes16,uint64,address[])")
+	bundleEventSigHash := crypto.Keccak256Hash(bundleEventSig)
+	builderBidEventSig := []byte("NewBuilderBidEvent(bytes16,uint64,address[],bytes)")
+	builderBidEventSigHash := crypto.Keccak256Hash(builderBidEventSig)
+
 	for {
 		select {
 		case err := <-sub.Err():
 			el.log.Fatal("Subscription: ", err)
 		case vLog := <-logs:
-			event := &BidEvent{}
-			if err := event.Unpack(&vLog, el.eventAbi); err != nil {
-				el.log.Warn("Failed to unpack hint event: ", err)
-				break
+			if vLog.Topics[0] == bundleEventSigHash {
+				el.log.Printf("Got bid event")
+				bidEvent := &BundleEvent{}
+				if err := bidEvent.Unpack(&vLog, el.bundleEventAbi); err != nil {
+					el.log.Warn("Failed to unpack hint event: ", err)
+					break
+				}
+				el.log.Printf("%+v\n", bidEvent)
+				el.TriggerBlockBuild(bidEvent.BidId, bidEvent.decryptCond)
+			} else if vLog.Topics[0] == builderBidEventSigHash {
+				el.log.Printf("Got builder bid event")
+				builderBidEvent := &BuilderBidEvent{}
+				if err := builderBidEvent.Unpack(&vLog, el.builderBidEventAbi); err != nil {
+					el.log.Warn("Failed to unpack hint event: ", err)
+					break
+				}
+				el.log.Printf("%+v\n", builderBidEvent)
+			} else {
+				el.log.Warn("Unknown event: ", vLog.Topics[0].Hex())
 			}
-
-			el.log.WithField("Event", event).Println("Event received, id:", event.BidId)
-			el.TriggerBlockBuild(event.BidId)
 		}
 	}
 }
 
 // Assumes Builder account is funded, see `BuilderAddr` in constants
-func (el *EventListener) TriggerBlockBuild(builderBid types.BidId) error {
+func (el *EventListener) TriggerBlockBuild(builderBid types.BidId, decryptCond uint64) error {
 	fr := framework.New()
 	builder := framework.NewPrivKeyFromHex(BuilderPrivKey)
 
@@ -100,8 +129,8 @@ func (el *EventListener) TriggerBlockBuild(builderBid types.BidId) error {
 	ctrct := fr.ContractAt(el.contractAddr, el.artifact.Abi)
 	builderCtrct := ctrct.Ref(builder)
 
-	el.log.Info("Trigger block build")
-	receipt := builderCtrct.SendTransaction(ContractBuildBlockMethod, []interface{}{}, []byte("hello"))
+	el.log.Info("Trigger block build for block ", decryptCond, " with bid ", builderBid)
+	receipt := builderCtrct.SendTransaction(ContractBuildBlockMethod, []interface{}{decryptCond}, []byte("hello"))
 
 	if receipt.Status == 0 {
 		return errUnsuccessfulTx
@@ -110,13 +139,13 @@ func (el *EventListener) TriggerBlockBuild(builderBid types.BidId) error {
 	return nil
 }
 
-type BidEvent struct {
+type BundleEvent struct {
 	BidId       [16]byte
 	decryptCond uint64
 	peekers     []common.Address
 }
 
-func (h *BidEvent) Unpack(log *types.Log, eventAbi abi.Event) error {
+func (h *BundleEvent) Unpack(log *types.Log, eventAbi abi.Event) error {
 	unpacked, err := eventAbi.Inputs.Unpack(log.Data)
 	if err != nil {
 		return err
@@ -124,5 +153,24 @@ func (h *BidEvent) Unpack(log *types.Log, eventAbi abi.Event) error {
 	h.BidId = unpacked[0].([16]byte)
 	h.decryptCond = unpacked[1].(uint64)
 	h.peekers = unpacked[2].([]common.Address)
+	return nil
+}
+
+type BuilderBidEvent struct {
+	BidId       [16]byte
+	decryptCond uint64
+	peekers     []common.Address
+	envelope    []byte
+}
+
+func (h *BuilderBidEvent) Unpack(log *types.Log, eventAbi abi.Event) error {
+	unpacked, err := eventAbi.Inputs.Unpack(log.Data)
+	if err != nil {
+		return err
+	}
+	h.BidId = unpacked[0].([16]byte)
+	h.decryptCond = unpacked[1].(uint64)
+	h.peekers = unpacked[2].([]common.Address)
+	h.envelope = unpacked[3].([]byte)
 	return nil
 }

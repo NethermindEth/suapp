@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -9,12 +10,14 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/flashbots/suapp-examples/framework"
 	"github.com/sirupsen/logrus"
 )
 
 const (
-	LogLevel = "debug"
+	LogLevel               = "debug"
+	OpDevAccountPrivKeyHex = "ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
 )
 
 func main() {
@@ -55,25 +58,34 @@ func main() {
 	fr.FundAccount(testAddr1.Address(), fundBalance)
 	fr.FundAccount(testAddr2.Address(), fundBalance)
 
-	targetAddr := testAddr1.Address()
-
-	tx1, _ := fr.SignTx(testAddr1, &types.LegacyTx{
-		To:       &targetAddr,
-		Value:    big.NewInt(1000),
-		Gas:      21000,
-		GasPrice: big.NewInt(13),
-	})
-
 	log.Info("2. Send transaction")
 
+	client, err := ethclient.Dial("http://localhost:9545")
+	OpDevAccountPrivKey := framework.NewPrivKeyFromHex(OpDevAccountPrivKeyHex)
+	ephemeralAddr := framework.GeneratePrivKey().Address()
+
+	blkNo, err := client.BlockNumber(context.Background())
+
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	nonce, err := client.NonceAt(context.Background(), OpDevAccountPrivKey.Address(), big.NewInt(int64(blkNo)))
+
+	opTxn1 := types.NewTransaction(nonce, ephemeralAddr, big.NewInt(1000), 21000, big.NewInt(13), nil)
+
+	opTxn1Signed, err := types.SignTx(opTxn1, types.NewEIP155Signer(big.NewInt(901)), OpDevAccountPrivKey.Priv)
+
 	bundle := &types.SBundle{
-		Txs:             types.Transactions{tx1},
+		Txs:             types.Transactions{opTxn1Signed},
 		RevertingHashes: []common.Hash{},
 	}
 	bundleBytes, _ := json.Marshal(bundle)
 
 	contractAddr1 := contract.Ref(testAddr1)
-	receipt := contractAddr1.SendTransaction("newTx", []interface{}{}, bundleBytes)
+
+	blockNo, err := client.BlockNumber(context.Background())
+	receipt := contractAddr1.SendTransaction("newTx", []interface{}{blockNo}, bundleBytes)
 	log.Info("Transaction sent", "receipt", receipt)
 
 	signalCh := make(chan os.Signal, 1)
