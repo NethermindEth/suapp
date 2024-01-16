@@ -21,7 +21,7 @@ const (
 	NewBuilderBidEventName   = "NewBuilderBidEvent"
 	ContractAbiJsonPath      = "optimism-builder.sol/OpBuilder.json"
 	ContractBuildBlockMethod = "buildBlock"
-	ContractPostBlockMethod  = "postBlockToRelay"
+	ContractPostBlockMethod  = "submitBlock"
 
 	// BuilderPrivKey Builder address "0xDceef22333b11aD2CAb54Be2A8ECe08EE64D919C" needs to be funded
 	BuilderPrivKey = "91ab9a7e53c220e6210460b65a7a3bb2ca181412a8a7b43ff336b3df1737ce12"
@@ -112,7 +112,7 @@ func (el *EventListener) Listen() {
 					break
 				}
 				el.log.Printf("%+v\n", builderBidEvent)
-				el.SubmitBlock(builderBidEvent.BidId, "http://localhost:18550")
+				el.SubmitBlock(builderBidEvent.BidId, "http://host.docker.internal:18550")
 			} else {
 				el.log.Warn("Unknown event: ", vLog.Topics[0].Hex())
 			}

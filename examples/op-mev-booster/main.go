@@ -9,7 +9,7 @@ import (
 
 const (
 	LogLevel          = "debug"
-	DefaultListenAddr = "localhost:18550"
+	DefaultListenAddr = "0.0.0.0:18550"
 )
 
 func main() {
@@ -23,17 +23,10 @@ func main() {
 	}
 	log.Logger.SetLevel(lvl)
 
-	evListSrv, err := NewEventListener(log)
-	if err != nil {
-		log.WithError(err).Fatal("failed creating the event listener")
-	}
-
 	httpSrv, err := NewBoostService(log, DefaultListenAddr)
 	if err != nil {
 		log.WithError(err).Fatal("failed creating the server")
 	}
-
-	go evListSrv.Listen()
 
 	log.Println("listening on", DefaultListenAddr)
 	log.Fatal(httpSrv.StartHTTPServer())

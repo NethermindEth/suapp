@@ -35,8 +35,9 @@ type BoostService struct {
 
 func NewBoostService(log *logrus.Entry, listenAddr string) (*BoostService, error) {
 	return &BoostService{
-		listenAddr: listenAddr,
-		log:        log,
+		listenAddr:   listenAddr,
+		log:          log,
+		payloadCache: map[common.Hash]builderCapella.SubmitBlockRequest{},
 	}, nil
 }
 
@@ -60,9 +61,9 @@ func (m *BoostService) StartHTTPServer() error {
 
 	err := m.srv.ListenAndServe()
 	if errors.Is(err, http.ErrServerClosed) {
-		return nil
+		return err
 	}
-	return err
+	return nil
 }
 
 func (m *BoostService) getRouter() http.Handler {
@@ -105,6 +106,11 @@ func (m *BoostService) handleOPGetPayload(w http.ResponseWriter, req *http.Reque
 	m.respondOK(w, translateResponse(bid))
 }
 
+func prettyPrint(i interface{}) string {
+	s, _ := json.MarshalIndent(i, "", "\t")
+	return string(s)
+}
+
 func (m *BoostService) handleGetBlockFromSuave(w http.ResponseWriter, req *http.Request) {
 	log := m.log.WithField("method", "getBlockFromSuave")
 	log.Debug("getBlockFromSuave request starts")
@@ -117,6 +123,9 @@ func (m *BoostService) handleGetBlockFromSuave(w http.ResponseWriter, req *http.
 
 	m.cacheLock.Lock()
 	defer m.cacheLock.Unlock()
+
+	log.Info("Payload received from suave", "payload", prettyPrint(resp.ExecutionPayload))
+
 	m.payloadCache[common.Hash(resp.ExecutionPayload.ParentHash)] = resp
 
 	m.respondOK(w, nilResponse)
