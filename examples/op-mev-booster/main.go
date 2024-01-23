@@ -9,7 +9,7 @@ import (
 
 const (
 	LogLevel          = "debug"
-	DefaultListenAddr = "0.0.0.0:18550"
+	DefaultListenAddr = "0.0.0.0:18585"
 )
 
 func main() {
