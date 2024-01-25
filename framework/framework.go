@@ -124,12 +124,15 @@ func (c *Contract) Call(methodName string) []interface{} {
 func (c *Contract) SendTransaction(method string, args []interface{}, confidentialBytes []byte) *types.Receipt {
 	txnResult, err := c.Contract.SendTransaction(method, args, confidentialBytes)
 	if err != nil {
+		fmt.Println("failed to send transaction", "err", err)
 		panic(err)
 	}
 	receipt, err := txnResult.Wait()
 	if err != nil {
+		fmt.Println("failed to wait for transaction", "err", err)
 		panic(err)
 	}
+
 	if receipt.Status == 0 {
 		panic("bad")
 	}
@@ -150,7 +153,7 @@ type Config struct {
 
 func DefaultConfig() *Config {
 	return &Config{
-		KettleRPC:  "http://localhost:8545",
+		KettleRPC:  "http://localhost:11545",
 		KettleAddr: common.HexToAddress("b5feafbdd752ad52afb7e1bd2e40432a485bbb7f"),
 
 		// This account is funded in both devnev networks
@@ -170,6 +173,10 @@ func New() *Framework {
 		rpc:    rpc,
 		clt:    clt,
 	}
+}
+
+func (f *Framework) ContractAt(addr common.Address, abi *abi.ABI) *Contract {
+	return &Contract{addr: addr, fr: f, abi: abi, Contract: sdk.GetContract(addr, abi, f.clt)}
 }
 
 func (f *Framework) DeployContract(path string) *Contract {
@@ -213,7 +220,7 @@ func (f *Framework) NewClient(acct *PrivKey) *sdk.Client {
 }
 
 func (f *Framework) SignTx(priv *PrivKey, tx *types.LegacyTx) (*types.Transaction, error) {
-	rpc, _ := rpc.Dial("http://localhost:8545")
+	rpc, _ := rpc.Dial("http://localhost:11545")
 
 	cltAcct1 := sdk.NewClient(rpc, priv.Priv, common.Address{})
 	signedTxn, err := cltAcct1.SignTxn(tx)
@@ -247,4 +254,12 @@ func (f *Framework) FundAccount(to common.Address, value *big.Int) error {
 		return errFundAccount
 	}
 	return nil
+}
+
+func (f *Framework) Balance(addr common.Address) (*big.Int, error) {
+	balance, err := f.clt.RPC().BalanceAt(context.Background(), addr, nil)
+	if err != nil {
+		return nil, err
+	}
+	return balance, nil
 }
