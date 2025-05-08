@@ -1,6 +1,7 @@
 module github.com/flashbots/suapp-examples
 
 go 1.21.3
+toolchain go1.24.1
 
 replace github.com/ethereum/go-ethereum => github.com/flashbots/suave-geth v0.0.0-20231109103245-75f702965158
 
@@ -38,8 +39,8 @@ require (
 	github.com/tklauser/numcpus v0.2.2 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	go.uber.org/zap v1.25.0 // indirect
-	golang.org/x/crypto v0.13.0 // indirect
-	golang.org/x/sys v0.12.0 // indirect
+	golang.org/x/crypto v0.35.0 // indirect
+	golang.org/x/sys v0.30.0 // indirect
 	golang.org/x/xerrors v0.0.0-20220907171357-04be3eba64a2 // indirect
 	gopkg.in/natefinch/npipe.v2 v2.0.0-20160621034901-c1b8fa8bdcce // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect
